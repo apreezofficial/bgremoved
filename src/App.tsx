@@ -3,9 +3,15 @@ import { useAppStore } from './store/useAppStore';
 import { HomeScreen } from './screens/HomeScreen';
 import { EditorScreen } from './screens/EditorScreen';
 import { ExportScreen } from './screens/ExportScreen';
+import { initWorker } from './lib/removerClient';
 
 export default function App() {
   const { screen } = useAppStore();
+
+  // Pre-warm ONNX background removal worker so first removal is instant
+  useEffect(() => {
+    initWorker().catch(() => {});
+  }, []);
 
   // System theme detection (light/dark based on OS)
   useEffect(() => {

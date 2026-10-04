@@ -24,7 +24,7 @@ export const ExportScreen: React.FC = () => {
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [savedSuccess, setSavedSuccess] = useState<boolean>(false);
 
-  // Render preview whenever options change
+  // Render preview instantly at preview resolution (max 600px)
   useEffect(() => {
     let isCancelled = false;
 
@@ -52,6 +52,7 @@ export const ExportScreen: React.FC = () => {
 
         const effectiveFormat: ExportFormat = target === 'object_only' ? 'png' : format;
 
+        // Render fast preview at max 600px
         const rendered = await composeAndRender({
           target,
           format: effectiveFormat,
@@ -61,6 +62,7 @@ export const ExportScreen: React.FC = () => {
           backgroundImage: bgImg,
           backgroundConfig,
           transform: cutoutTransform,
+          maxDimension: 600,
         });
 
         if (!isCancelled) {
@@ -78,12 +80,48 @@ export const ExportScreen: React.FC = () => {
   }, [cutoutImageUrl, target, format, quality, backgroundConfig, cutoutTransform]);
 
   const handleSave = async () => {
-    if (!previewUrl) return;
+    if (!cutoutImageUrl || isExporting) return;
     setIsExporting(true);
     try {
-      const ext = (target === 'object_only' ? 'png' : format) === 'jpeg' ? 'jpg' : 'png';
+      const cutoutImg = new Image();
+      await new Promise((resolve, reject) => {
+        cutoutImg.onload = resolve;
+        cutoutImg.onerror = reject;
+        cutoutImg.src = cutoutImageUrl;
+      });
+
+      const canvas = document.createElement('canvas');
+      canvas.width = cutoutImg.naturalWidth;
+      canvas.height = cutoutImg.naturalHeight;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(cutoutImg, 0, 0);
+
+      let bgImg: HTMLImageElement | null = null;
+      if (backgroundConfig.type === 'image' && backgroundConfig.customImageUrl) {
+        bgImg = new Image();
+        await new Promise((r) => {
+          bgImg!.onload = r;
+          bgImg!.src = backgroundConfig.customImageUrl!;
+        });
+      }
+
+      const effectiveFormat: ExportFormat = target === 'object_only' ? 'png' : format;
+
+      // Full-resolution export on demand
+      const rendered = await composeAndRender({
+        target,
+        format: effectiveFormat,
+        quality,
+        cutoutCanvas: canvas,
+        originalImage: null,
+        backgroundImage: bgImg,
+        backgroundConfig,
+        transform: cutoutTransform,
+      });
+
+      const ext = effectiveFormat === 'jpeg' ? 'jpg' : 'png';
       const filename = `bgremoved_${Date.now()}.${ext}`;
-      await saveToDevice(previewUrl, filename);
+      await saveToDevice(rendered.blob, rendered.dataUrl, filename);
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 3000);
     } catch (err: any) {
@@ -94,12 +132,48 @@ export const ExportScreen: React.FC = () => {
   };
 
   const handleShare = async () => {
-    if (!previewUrl) return;
+    if (!cutoutImageUrl || isExporting) return;
     setIsExporting(true);
     try {
-      const ext = (target === 'object_only' ? 'png' : format) === 'jpeg' ? 'jpg' : 'png';
+      const cutoutImg = new Image();
+      await new Promise((resolve, reject) => {
+        cutoutImg.onload = resolve;
+        cutoutImg.onerror = reject;
+        cutoutImg.src = cutoutImageUrl;
+      });
+
+      const canvas = document.createElement('canvas');
+      canvas.width = cutoutImg.naturalWidth;
+      canvas.height = cutoutImg.naturalHeight;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(cutoutImg, 0, 0);
+
+      let bgImg: HTMLImageElement | null = null;
+      if (backgroundConfig.type === 'image' && backgroundConfig.customImageUrl) {
+        bgImg = new Image();
+        await new Promise((r) => {
+          bgImg!.onload = r;
+          bgImg!.src = backgroundConfig.customImageUrl!;
+        });
+      }
+
+      const effectiveFormat: ExportFormat = target === 'object_only' ? 'png' : format;
+
+      // Full-resolution export on demand
+      const rendered = await composeAndRender({
+        target,
+        format: effectiveFormat,
+        quality,
+        cutoutCanvas: canvas,
+        originalImage: null,
+        backgroundImage: bgImg,
+        backgroundConfig,
+        transform: cutoutTransform,
+      });
+
+      const ext = effectiveFormat === 'jpeg' ? 'jpg' : 'png';
       const filename = `bgremoved_${Date.now()}.${ext}`;
-      await shareImage(previewUrl, filename);
+      await shareImage(rendered.blob, rendered.dataUrl, filename);
     } catch (err: any) {
       alert('Failed to share: ' + (err.message || 'Unknown error'));
     } finally {
@@ -210,7 +284,9 @@ export const ExportScreen: React.FC = () => {
           disabled={isExporting || !previewUrl}
           className="w-full flex items-center justify-center space-x-2 bg-accent text-accent-fg py-3.5 px-6 rounded-btn font-semibold text-sm tracking-tight hover:bg-accent-hover active:scale-[0.99] transition-all duration-fast disabled:opacity-50"
         >
-          {savedSuccess ? (
+          {isExporting ? (
+            <span>Exporting...</span>
+          ) : savedSuccess ? (
             <>
               <CheckIcon size={18} />
               <span>Saved to Gallery!</span>
@@ -228,8 +304,14 @@ export const ExportScreen: React.FC = () => {
           disabled={isExporting || !previewUrl}
           className="w-full flex items-center justify-center space-x-2 bg-card hover:bg-surface border border-border text-fg py-3 px-6 rounded-btn font-medium text-sm tracking-tight active:scale-[0.99] transition-all duration-fast disabled:opacity-50"
         >
-          <ShareIcon size={18} className="text-muted" />
-          <span>Share</span>
+          {isExporting ? (
+            <span>Preparing...</span>
+          ) : (
+            <>
+              <ShareIcon size={18} className="text-muted" />
+              <span>Share</span>
+            </>
+          )}
         </button>
       </div>
     </div>

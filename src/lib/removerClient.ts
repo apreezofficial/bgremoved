@@ -50,30 +50,33 @@ export async function removeBackground(
     originalWidth = imageSource.width;
     originalHeight = imageSource.height;
   } else {
-    originalWidth = imageSource.width;
-    originalHeight = imageSource.height;
+    originalWidth = (imageSource as any).naturalWidth || imageSource.width;
+    originalHeight = (imageSource as any).naturalHeight || imageSource.height;
   }
 
-  // Draw onto canvas to extract full-res ImageData
-  const canvas = document.createElement('canvas');
-  canvas.width = originalWidth;
-  canvas.height = originalHeight;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+  // Draw 320x320 small version directly for U2-Netp (hardware accelerated)
+  const smallCanvas = document.createElement('canvas');
+  smallCanvas.width = 320;
+  smallCanvas.height = 320;
+  const smallCtx = smallCanvas.getContext('2d', { willReadFrequently: true })!;
 
-  let origImageData: ImageData;
   if (imageSource instanceof ImageData) {
-    origImageData = imageSource;
-    ctx.putImageData(imageSource, 0, 0);
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = originalWidth;
+    tempCanvas.height = originalHeight;
+    const tempCtx = tempCanvas.getContext('2d')!;
+    tempCtx.putImageData(imageSource, 0, 0);
+    smallCtx.drawImage(tempCanvas, 0, 0, 320, 320);
   } else {
-    ctx.drawImage(imageSource, 0, 0);
-    origImageData = ctx.getImageData(0, 0, originalWidth, heightFromWidth(imageSource));
+    smallCtx.drawImage(imageSource, 0, 0, 320, 320);
   }
 
+  const smallImageData = smallCtx.getImageData(0, 0, 320, 320);
   const id = Math.random().toString(36).substring(2, 9);
 
   return new Promise((resolve, reject) => {
     const messageHandler = (e: MessageEvent) => {
-      const { type, id: msgId, stage, percent, message, resultImageData, error } = e.data;
+      const { type, id: msgId, stage, percent, message, maskAlpha, targetSize = 320, error } = e.data;
 
       if (type === 'PROGRESS' && (!msgId || msgId === id)) {
         onProgress?.({
@@ -81,28 +84,61 @@ export async function removeBackground(
           percent: percent || 0,
           message: message || '',
         });
-      } else if (type === 'SUCCESS' && msgId === id) {
+      } else if (type === 'SUCCESS_MASK' && msgId === id) {
         w.removeEventListener('message', messageHandler);
 
-        // Put result to canvas to convert to PNG blob
-        const resCanvas = document.createElement('canvas');
-        resCanvas.width = resultImageData.width;
-        resCanvas.height = resultImageData.height;
-        const resCtx = resCanvas.getContext('2d')!;
-        resCtx.putImageData(resultImageData, 0, 0);
+        try {
+          // 1. Create mask canvas
+          const maskCanvas = document.createElement('canvas');
+          maskCanvas.width = targetSize;
+          maskCanvas.height = targetSize;
+          const maskCtx = maskCanvas.getContext('2d')!;
+          const maskImgData = maskCtx.createImageData(targetSize, targetSize);
+          const maskPixels = maskImgData.data;
 
-        resCanvas.toBlob((blob) => {
-          if (blob) {
-            resolve({
-              resultImageData,
-              width: resultImageData.width,
-              height: resultImageData.height,
-              blob,
-            });
-          } else {
-            reject(new Error('Failed to create Blob from canvas'));
+          for (let i = 0; i < maskAlpha.length; i++) {
+            const idx = i * 4;
+            maskPixels[idx] = 0;
+            maskPixels[idx + 1] = 0;
+            maskPixels[idx + 2] = 0;
+            maskPixels[idx + 3] = maskAlpha[i];
           }
-        }, 'image/png');
+          maskCtx.putImageData(maskImgData, 0, 0);
+
+          // 2. Hardware-accelerated GPU masking
+          const resCanvas = document.createElement('canvas');
+          resCanvas.width = originalWidth;
+          resCanvas.height = originalHeight;
+          const resCtx = resCanvas.getContext('2d', { willReadFrequently: true })!;
+
+          if (imageSource instanceof ImageData) {
+            resCtx.putImageData(imageSource, 0, 0);
+          } else {
+            resCtx.drawImage(imageSource, 0, 0, originalWidth, originalHeight);
+          }
+
+          resCtx.imageSmoothingEnabled = true;
+          resCtx.imageSmoothingQuality = 'high';
+          resCtx.globalCompositeOperation = 'destination-in';
+          resCtx.drawImage(maskCanvas, 0, 0, originalWidth, originalHeight);
+
+          const resultImageData = resCtx.getImageData(0, 0, originalWidth, originalHeight);
+
+          resCanvas.toBlob((blob) => {
+            if (blob) {
+              resolve({
+                resultImageData,
+                width: originalWidth,
+                height: originalHeight,
+                blob,
+              });
+            } else {
+              reject(new Error('Failed to create Blob from canvas'));
+            }
+          }, 'image/png');
+        } catch (err) {
+          reject(err);
+        }
       } else if (type === 'ERROR' && (!msgId || msgId === id)) {
         w.removeEventListener('message', messageHandler);
         reject(new Error(error || 'Background removal failed'));
@@ -111,20 +147,14 @@ export async function removeBackground(
 
     w.addEventListener('message', messageHandler);
 
-    // Send to worker
+    // Send small 320x320 image to worker (only ~400KB!)
     w.postMessage(
       {
         type: 'PROCESS',
         id,
-        imageData: origImageData,
-        width: originalWidth,
-        height: originalHeight,
+        smallImageData,
       },
-      [origImageData.data.buffer]
+      [smallImageData.data.buffer]
     );
   });
-}
-
-function heightFromWidth(source: HTMLImageElement | ImageBitmap): number {
-  return source.height;
 }

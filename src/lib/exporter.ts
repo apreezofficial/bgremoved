@@ -12,6 +12,7 @@ export interface ExportOptions {
   backgroundImage: HTMLImageElement | null;
   backgroundConfig: BackgroundConfig;
   transform: CutoutTransform;
+  maxDimension?: number;
 }
 
 export async function composeAndRender(options: ExportOptions): Promise<{ dataUrl: string; blob: Blob }> {
@@ -23,19 +24,31 @@ export async function composeAndRender(options: ExportOptions): Promise<{ dataUr
     backgroundImage,
     backgroundConfig,
     transform,
+    maxDimension,
   } = options;
 
-  const width = cutoutCanvas.width;
-  const height = cutoutCanvas.height;
+  let width = cutoutCanvas.width;
+  let height = cutoutCanvas.height;
+
+  // If maxDimension is set (e.g. for instant live preview), scale down canvas
+  const origWidth = width;
+  const origHeight = height;
+  if (maxDimension && (width > maxDimension || height > maxDimension)) {
+    const scale = maxDimension / Math.max(width, height);
+    width = Math.round(width * scale);
+    height = Math.round(height * scale);
+  }
 
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d')!;
 
+  const scaleRatio = width / origWidth;
+
   // 1. If target is 'object_only'
   if (target === 'object_only') {
-    ctx.drawImage(cutoutCanvas, 0, 0);
+    ctx.drawImage(cutoutCanvas, 0, 0, width, height);
   } else if (target === 'background_only') {
     // Render only background
     renderBackground(ctx, width, height, backgroundConfig, backgroundImage);
@@ -46,24 +59,24 @@ export async function composeAndRender(options: ExportOptions): Promise<{ dataUr
 
     // Step B: Draw transformed cutout
     ctx.save();
-    // Center of canvas
     const cx = width / 2;
     const cy = height / 2;
 
-    ctx.translate(cx + transform.x, cy + transform.y);
+    ctx.translate(cx + transform.x * scaleRatio, cy + transform.y * scaleRatio);
     ctx.rotate((transform.rotation * Math.PI) / 180);
-    ctx.scale(transform.scale, transform.scale);
-    ctx.drawImage(cutoutCanvas, -cx, -cy);
+    ctx.scale(transform.scale * scaleRatio, transform.scale * scaleRatio);
+    ctx.drawImage(cutoutCanvas, -origWidth / 2, -origHeight / 2, origWidth, origHeight);
     ctx.restore();
   }
 
   const mimeType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
-  const dataUrl = canvas.toDataURL(mimeType, quality);
 
+  // For small preview canvases, toDataURL is instant.
   return new Promise((resolve, reject) => {
     canvas.toBlob(
       (blob) => {
         if (!blob) return reject(new Error('Failed to encode image to blob'));
+        const dataUrl = canvas.toDataURL(mimeType, quality);
         resolve({ dataUrl, blob });
       },
       mimeType,
@@ -105,11 +118,10 @@ function renderBackground(
   }
 }
 
-export async function saveToDevice(dataUrl: string, filename: string): Promise<string> {
-  const base64Data = dataUrl.split(',')[1];
-
+export async function saveToDevice(blob: Blob, dataUrl: string, filename: string): Promise<string> {
   if (Capacitor.isNativePlatform()) {
     try {
+      const base64Data = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
       const result = await Filesystem.writeFile({
         path: filename,
         data: base64Data,
@@ -123,20 +135,22 @@ export async function saveToDevice(dataUrl: string, filename: string): Promise<s
     }
   }
 
-  // Web download fallback
+  // Web download fallback: blob URL is lightning fast and memory efficient
+  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = dataUrl;
+  a.href = url;
   a.download = filename;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
   return filename;
 }
 
-export async function shareImage(dataUrl: string, filename: string): Promise<void> {
+export async function shareImage(blob: Blob, dataUrl: string, filename: string): Promise<void> {
   if (Capacitor.isNativePlatform()) {
     try {
-      const base64Data = dataUrl.split(',')[1];
+      const base64Data = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
       const saved = await Filesystem.writeFile({
         path: filename,
         data: base64Data,
@@ -157,18 +171,19 @@ export async function shareImage(dataUrl: string, filename: string): Promise<voi
   // Web share API if supported
   if (navigator.share) {
     try {
-      const blob = await (await fetch(dataUrl)).blob();
       const file = new File([blob], filename, { type: blob.type });
-      await navigator.share({
-        title: 'bgremoved',
-        files: [file],
-      });
-      return;
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          title: 'bgremoved',
+          files: [file],
+        });
+        return;
+      }
     } catch (err) {
       console.warn('Web share failed', err);
     }
   }
 
   // Fallback: trigger download
-  await saveToDevice(dataUrl, filename);
+  await saveToDevice(blob, dataUrl, filename);
 }

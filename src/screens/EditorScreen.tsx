@@ -41,6 +41,7 @@ export const EditorScreen: React.FC = () => {
     cutoutTransform,
     setCutoutTransform,
     resetCutoutTransform,
+    setCutoutImageUrl,
   } = useAppStore();
 
   const editorRef = useRef<CanvasEditorHandle>(null);
@@ -58,7 +59,18 @@ export const EditorScreen: React.FC = () => {
   };
 
   const handleExportClick = () => {
-    setScreen('export');
+    const canvas = editorRef.current?.getCutoutCanvas();
+    if (canvas) {
+      canvas.toBlob((blob) => {
+        if (blob) {
+          const url = URL.createObjectURL(blob);
+          setCutoutImageUrl(url);
+        }
+        setScreen('export');
+      }, 'image/png');
+    } else {
+      setScreen('export');
+    }
   };
 
   return (

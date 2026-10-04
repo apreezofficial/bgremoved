@@ -47,11 +47,27 @@ export const HomeScreen: React.FC = () => {
 
           const cutoutUrl = URL.createObjectURL(blob);
 
+          // Fast lightweight thumbnail for past edits list
+          let thumbDataUrl = cutoutUrl;
+          try {
+            const thumbCanvas = document.createElement('canvas');
+            thumbCanvas.width = 120;
+            thumbCanvas.height = Math.max(1, Math.round((120 * height) / (width || 1)));
+            const thumbCtx = thumbCanvas.getContext('2d')!;
+            const cutoutImg = new Image();
+            await new Promise((r) => {
+              cutoutImg.onload = r;
+              cutoutImg.src = cutoutUrl;
+            });
+            thumbCtx.drawImage(cutoutImg, 0, 0, thumbCanvas.width, thumbCanvas.height);
+            thumbDataUrl = thumbCanvas.toDataURL('image/png');
+          } catch {}
+
           // Save to local recents
           const recentItem: RecentItem = {
             id: 'rec_' + Date.now(),
             timestamp: Date.now(),
-            thumbnailDataUrl: cutoutUrl,
+            thumbnailDataUrl: thumbDataUrl,
             originalDataUrl: picked.dataUrl,
             resultDataUrl: cutoutUrl,
             width,

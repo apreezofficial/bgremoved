@@ -4,7 +4,11 @@ import * as ort from 'onnxruntime-web';
 (ort.env.wasm as any).wasmPaths = {
   'ort-wasm-simd-threaded.wasm': `${location.origin}/onnx/ort-wasm-simd-threaded.wasm`,
 };
-ort.env.wasm.numThreads = 1;
+if (typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated) {
+  ort.env.wasm.numThreads = Math.min(4, navigator.hardwareConcurrency || 2);
+} else {
+  ort.env.wasm.numThreads = 1;
+}
 ort.env.wasm.simd = true;
 
 let session: ort.InferenceSession | null = null;
@@ -54,7 +58,7 @@ async function getOrCreateSession(): Promise<ort.InferenceSession> {
 }
 
 self.onmessage = async (e: MessageEvent) => {
-  const { type, id, imageData, width, height } = e.data;
+  const { type, id, smallImageData, imageData, width, height } = e.data;
 
   if (type === 'INIT') {
     try {
@@ -78,17 +82,19 @@ self.onmessage = async (e: MessageEvent) => {
         message: 'Preparing image...',
       });
 
-      // 1. Resize input to 320x320 for U²-Netp
-      const offscreenSmall = new OffscreenCanvas(TARGET_SIZE, TARGET_SIZE);
-      const ctxSmall = offscreenSmall.getContext('2d')!;
-      
-      const offscreenOrig = new OffscreenCanvas(width, height);
-      const ctxOrig = offscreenOrig.getContext('2d')!;
-      ctxOrig.putImageData(imageData, 0, 0);
-
-      ctxSmall.drawImage(offscreenOrig, 0, 0, TARGET_SIZE, TARGET_SIZE);
-      const smallImgData = ctxSmall.getImageData(0, 0, TARGET_SIZE, TARGET_SIZE);
-      const smallPixels = smallImgData.data;
+      // 1. Get 320x320 pixels directly (no heavy offscreen canvas copies)
+      let smallPixels: Uint8ClampedArray;
+      if (smallImageData) {
+        smallPixels = smallImageData.data;
+      } else {
+        const offscreenSmall = new OffscreenCanvas(TARGET_SIZE, TARGET_SIZE);
+        const ctxSmall = offscreenSmall.getContext('2d')!;
+        const offscreenOrig = new OffscreenCanvas(width, height);
+        const ctxOrig = offscreenOrig.getContext('2d')!;
+        ctxOrig.putImageData(imageData, 0, 0);
+        ctxSmall.drawImage(offscreenOrig, 0, 0, TARGET_SIZE, TARGET_SIZE);
+        smallPixels = ctxSmall.getImageData(0, 0, TARGET_SIZE, TARGET_SIZE).data;
+      }
 
       // 2. Normalize and format to [1, 3, 320, 320] NCHW Float32Array
       const inputTensorData = new Float32Array(3 * TARGET_SIZE * TARGET_SIZE);
@@ -139,45 +145,11 @@ self.onmessage = async (e: MessageEvent) => {
       }
       const range = maxVal - minVal || 1.0;
 
-      // Create 320x320 grayscale mask image
-      const maskImgData = ctxSmall.createImageData(TARGET_SIZE, TARGET_SIZE);
-      const maskPixels = maskImgData.data;
-
-      for (let i = 0; i < maskData.length; i++) {
+      // Extract 320x320 alpha values (0 to 255)
+      const maskAlpha = new Uint8ClampedArray(planeSize);
+      for (let i = 0; i < planeSize; i++) {
         const norm = (maskData[i] - minVal) / range;
-        const gray = Math.round(norm * 255);
-        const idx = i * 4;
-        maskPixels[idx] = gray;
-        maskPixels[idx + 1] = gray;
-        maskPixels[idx + 2] = gray;
-        maskPixels[idx + 3] = 255; // fully opaque mask canvas
-      }
-
-      ctxSmall.putImageData(maskImgData, 0, 0);
-
-      // 5. Upscale mask back to original resolution
-      const offscreenMaskLarge = new OffscreenCanvas(width, height);
-      const ctxMaskLarge = offscreenMaskLarge.getContext('2d')!;
-      ctxMaskLarge.imageSmoothingEnabled = true;
-      ctxMaskLarge.imageSmoothingQuality = 'high';
-      ctxMaskLarge.drawImage(offscreenSmall, 0, 0, width, height);
-
-      const upscaledMaskData = ctxMaskLarge.getImageData(0, 0, width, height);
-      const upscaledMaskPixels = upscaledMaskData.data;
-
-      // 6. Apply upscaled mask as alpha channel to full-res original
-      const resultImageData = new ImageData(
-        new Uint8ClampedArray(imageData.data),
-        width,
-        height
-      );
-      const resultPixels = resultImageData.data;
-
-      for (let i = 0; i < resultPixels.length; i += 4) {
-        // Red channel of upscaled mask holds the gray value (0-255)
-        const maskAlpha = upscaledMaskPixels[i] / 255.0;
-        // Multiply original alpha by mask alpha
-        resultPixels[i + 3] = Math.round(resultPixels[i + 3] * maskAlpha);
+        maskAlpha[i] = Math.round(norm * 255);
       }
 
       postMessage({
@@ -190,13 +162,12 @@ self.onmessage = async (e: MessageEvent) => {
 
       postMessage(
         {
-          type: 'SUCCESS',
+          type: 'SUCCESS_MASK',
           id,
-          resultImageData,
-          width,
-          height,
+          maskAlpha,
+          targetSize: TARGET_SIZE,
         },
-        [resultImageData.data.buffer]
+        [maskAlpha.buffer]
       );
     } catch (err: any) {
       postMessage({
