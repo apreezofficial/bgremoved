@@ -1,12 +1,12 @@
 # bgremoved
 
-A fully offline, on-device background remover Android app built with Vite, React, TypeScript, Capacitor 6, and onnxruntime-web running U²-Netp in a Web Worker.
+A fully offline background remover Android app built with Vite, React, TypeScript, Capacitor 6, and onnxruntime-web running U²‑Netp in a Web Worker.
 
-Zero server dependencies. Zero API keys. Operates 100% offline in airplane mode.
+Zero server dependencies. Zero API keys. Operates offline in airplane mode.
 
 ## Features
 
-- **Auto Remove**: Instant on-device neural network background removal with progress tracking.
+- **Auto Remove**: Instant background removal with progress tracking.
 - **Custom Editing Tools**:
   - **Erase & Restore Brush**: Adjustable size (6–120px) and softness (0–100%) to refine or restore details from the full-resolution source image.
   - **Magic Wand**: Tap to erase contiguous color regions with a configurable tolerance slider.

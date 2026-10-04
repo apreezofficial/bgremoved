@@ -20,7 +20,7 @@ export const HomeScreen: React.FC = () => {
   } = useAppStore();
 
   useEffect(() => {
-    // Load local on-device recents on mount
+    // Load local recents on mount
     getAllRecents().then((items) => {
       setRecents(items);
     });
@@ -35,7 +35,7 @@ export const HomeScreen: React.FC = () => {
       setProgress({
         stage: 'loading_model',
         percent: 10,
-        message: 'Initializing on-device AI...',
+        message: 'Initializing model...',
       });
 
       const img = new Image();
@@ -92,12 +92,12 @@ export const HomeScreen: React.FC = () => {
       {/* Brand Header */}
       <div className="flex items-center justify-between mb-8 pt-2">
         <div>
-          <span className="text-xs font-mono tracking-widest text-accent uppercase font-bold">100% Offline AI</span>
+
           <h1 className="text-3xl font-bold tracking-tightest text-fg mt-1">bgremoved</h1>
         </div>
         <div className="flex items-center space-x-1 px-2.5 py-1 rounded-btn bg-surface border border-border">
           <span className="w-2 h-2 rounded-full bg-accent inline-block mr-1.5" />
-          <span className="text-xs font-mono text-muted">ON-DEVICE</span>
+          {/* ON-DEVICE badge removed */}
         </div>
       </div>
 
@@ -130,7 +130,7 @@ export const HomeScreen: React.FC = () => {
               <SparklesIcon size={24} />
             </div>
             <h3 className="text-lg font-bold tracking-tight text-fg mb-1">Removing Background</h3>
-            <p className="text-xs font-mono text-muted mb-6">{progress.message || 'Processing on-device...'}</p>
+            <p className="text-xs font-mono text-muted mb-6">{progress.message || 'Processing...'}</p>
 
             {/* Flat Progress Bar */}
             <div className="w-full bg-surface border border-border rounded-btn h-3 overflow-hidden p-0.5 mb-3">

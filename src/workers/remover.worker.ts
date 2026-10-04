@@ -1,7 +1,9 @@
 import * as ort from 'onnxruntime-web';
 
-// Configure ONNX Runtime to load WASM binaries locally from /onnx/
-ort.env.wasm.wasmPaths = '/onnx/';
+// Configure ONNX Runtime to load WASM binaries locally from the app's own origin
+ort.env.wasm.wasmPaths = {
+  'ort-wasm-simd-threaded.wasm': `${location.origin}/onnx/ort-wasm-simd-threaded.wasm`
+};
 ort.env.wasm.numThreads = 1;
 ort.env.wasm.simd = true;
 
@@ -107,7 +109,7 @@ self.onmessage = async (e: MessageEvent) => {
         id,
         stage: 'inferring',
         percent: 60,
-        message: 'Removing background on-device...',
+        message: 'Removing background...',
       });
 
       // 3. Inference
