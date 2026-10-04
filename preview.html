@@ -8,8 +8,23 @@
 </head>
 <body class="bg-bg text-fg overflow-hidden">
   <div id="root"></div>
-  <!-- Vite builds the entry as a module in the dist folder. The exact filename may contain a hash, but Vite also generates a manifest.
-       For a simple preview we can load the generic entry point "index.js" which Vite creates when using the default config. -->
-  <script type="module" src="/dist/assets/index.js"></script>
+  <script>
+    // Dynamically load the Vite build entry based on manifest (handles hashed filenames)
+    fetch('/dist/manifest.json')
+      .then(r => r.json())
+      .then(manifest => {
+        // Find the entry that is marked as entry point
+        const entry = Object.values(manifest).find((v: any) => v.isEntry && v.file);
+        if (entry) {
+          const script = document.createElement('script');
+          script.type = 'module';
+          script.src = `/dist/${entry.file}`;
+          document.body.appendChild(script);
+        } else {
+          console.error('Vite manifest entry not found');
+        }
+      })
+      .catch(err => console.error('Failed to load Vite manifest', err));
+  </script>
 </body>
 </html>

@@ -49,6 +49,7 @@ export const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
     // Drawing state
     const isInteractingRef = useRef<boolean>(false);
     const lastPointRef = useRef<{ x: number; y: number } | null>(null);
+  const drawPendingRef = useRef<boolean>(false);
 
     // Gesture tracking (pinch / 2-finger pan)
     const touchStartDistRef = useRef<number | null>(null);
@@ -217,8 +218,12 @@ export const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
         const offCtx = off.getContext('2d')!;
 
         // Draw source portion
-        const sx = x - size * 0.5;
-        const sy = y - size * 0.5;
+        // Clamp source coordinates to ensure they stay within the original image bounds
+        const canvas = canvasRef.current!;
+        const maxX = canvas.width - size;
+        const maxY = canvas.height - size;
+        const sx = Math.max(0, Math.min(x - size * 0.5, maxX));
+        const sy = Math.max(0, Math.min(y - size * 0.5, maxY));
         offCtx.drawImage(origImgRef.current, sx, sy, size, size, 0, 0, size, size);
 
         // Apply radial mask
@@ -301,7 +306,6 @@ export const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
         const dx = e.clientX - lastPointRef.current.x;
         const dy = e.clientY - lastPointRef.current.y;
         lastPointRef.current = { x: e.clientX, y: e.clientY };
-
         setCutoutTransform((prev) => ({
           ...prev,
           x: prev.x + dx / zoom,
@@ -313,8 +317,15 @@ export const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
       if (activeTool === 'erase' || activeTool === 'restore') {
         const coords = getCanvasCoords(e.clientX, e.clientY);
         if (!coords) return;
-        drawLine(lastPointRef.current.x, lastPointRef.current.y, coords.x, coords.y);
-        lastPointRef.current = coords;
+        // Throttle drawing using requestAnimationFrame
+        if (!drawPendingRef.current) {
+          drawPendingRef.current = true;
+          requestAnimationFrame(() => {
+            drawLine(lastPointRef.current!.x, lastPointRef.current!.y, coords.x, coords.y);
+            lastPointRef.current = coords;
+            drawPendingRef.current = false;
+          });
+        }
       }
     };
 
