@@ -1,0 +1,89 @@
+@font-face {
+  font-family: 'Space Grotesk';
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/SpaceGrotesk-Regular.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Space Grotesk';
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/SpaceGrotesk-Medium.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Space Grotesk';
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/SpaceGrotesk-SemiBold.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Space Grotesk';
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/SpaceGrotesk-Bold.woff2') format('woff2');
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --bg: #0B0B0C;
+  --fg: #F4F4F5;
+  --accent: #C6FF3D;
+  --border: #27272A;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #0B0B0C;
+  color: #F4F4F5;
+  font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+  overflow: hidden;
+  height: 100vh;
+  height: 100dvh;
+  width: 100vw;
+}
+
+/* Transparent checkerboard background pattern */
+.bg-checkerboard {
+  background-color: #141416;
+  background-image: 
+    linear-gradient(45deg, #1C1C20 25%, transparent 25%),
+    linear-gradient(-45deg, #1C1C20 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #1C1C20 75%),
+    linear-gradient(-45deg, transparent 75%, #1C1C20 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #27272A;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3F3F46;
+}

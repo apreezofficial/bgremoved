@@ -1,0 +1,28 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Clean flat geometric cutout mark in lime #C6FF3D -->
+    <!-- Outer sharp bounding rect corners -->
+    <path
+        android:fillColor="#C6FF3D"
+        android:pathData="M30,30 L44,30 L44,34 L34,34 L34,44 L30,44 Z" />
+    <path
+        android:fillColor="#C6FF3D"
+        android:pathData="M78,30 L64,30 L64,34 L74,34 L74,44 L78,44 Z" />
+    <path
+        android:fillColor="#C6FF3D"
+        android:pathData="M30,78 L44,78 L44,74 L34,74 L34,64 L30,64 Z" />
+    <path
+        android:fillColor="#C6FF3D"
+        android:pathData="M78,78 L64,78 L64,74 L74,74 L74,64 L78,64 Z" />
+    <!-- Center subject shape: clean silhouette diamond/lens in accent lime -->
+    <path
+        android:fillColor="#C6FF3D"
+        android:pathData="M54,40 L68,54 L54,68 L40,54 Z" />
+    <!-- Inner cut hole in background dark color -->
+    <path
+        android:fillColor="#0B0B0C"
+        android:pathData="M54,47 L61,54 L54,61 L47,54 Z" />
+</vector>
