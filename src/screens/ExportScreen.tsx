@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { composeAndRender, saveToDevice, shareImage } from '../lib/exporter';
 import { ExportFormat, ExportTarget } from '../types';
@@ -19,91 +19,78 @@ export const ExportScreen: React.FC = () => {
 
   const [target, setTarget] = useState<ExportTarget>('composed');
   const [format, setFormat] = useState<ExportFormat>('png');
-  const [quality, setQuality] = useState<number>(0.92);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [quality] = useState<number>(0.92);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(cutoutImageUrl);
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [savedSuccess, setSavedSuccess] = useState<boolean>(false);
 
-  // Render preview instantly at preview resolution (max 600px)
+  const cutoutImgRef = useRef<HTMLImageElement | null>(null);
+  const bgImgRef = useRef<HTMLImageElement | null>(null);
+  const [, setLoadVersion] = useState<number>(0);
+
+  // 1. Load cutout image once
   useEffect(() => {
-    let isCancelled = false;
-
-    async function updatePreview() {
-      if (!cutoutImageUrl) return;
-
-      const cutoutImg = new Image();
-      cutoutImg.onload = async () => {
-        if (isCancelled) return;
-
-        const canvas = document.createElement('canvas');
-        canvas.width = cutoutImg.naturalWidth;
-        canvas.height = cutoutImg.naturalHeight;
-        const ctx = canvas.getContext('2d')!;
-        ctx.drawImage(cutoutImg, 0, 0);
-
-        let bgImg: HTMLImageElement | null = null;
-        if (backgroundConfig.type === 'image' && backgroundConfig.customImageUrl) {
-          bgImg = new Image();
-          await new Promise((r) => {
-            bgImg!.onload = r;
-            bgImg!.src = backgroundConfig.customImageUrl!;
-          });
-        }
-
-        const effectiveFormat: ExportFormat = target === 'object_only' ? 'png' : format;
-
-        // Render fast preview at max 600px
-        const rendered = await composeAndRender({
-          target,
-          format: effectiveFormat,
-          quality,
-          cutoutCanvas: canvas,
-          originalImage: null,
-          backgroundImage: bgImg,
-          backgroundConfig,
-          transform: cutoutTransform,
-          maxDimension: 600,
-        });
-
-        if (!isCancelled) {
-          setPreviewUrl(rendered.dataUrl);
-        }
-      };
-      cutoutImg.src = cutoutImageUrl;
-    }
-
-    updatePreview();
-
-    return () => {
-      isCancelled = true;
+    if (!cutoutImageUrl) return;
+    const img = new Image();
+    img.onload = () => {
+      cutoutImgRef.current = img;
+      setLoadVersion((v) => v + 1);
     };
-  }, [cutoutImageUrl, target, format, quality, backgroundConfig, cutoutTransform]);
+    img.src = cutoutImageUrl;
+  }, [cutoutImageUrl]);
+
+  // 2. Load background image if set
+  useEffect(() => {
+    if (backgroundConfig.type === 'image' && backgroundConfig.customImageUrl) {
+      const bg = new Image();
+      bg.onload = () => {
+        bgImgRef.current = bg;
+        setLoadVersion((v) => v + 1);
+      };
+      bg.src = backgroundConfig.customImageUrl;
+    } else {
+      bgImgRef.current = null;
+      setLoadVersion((v) => v + 1);
+    }
+  }, [backgroundConfig.customImageUrl, backgroundConfig.type]);
+
+  // 3. Render fast live preview whenever settings change
+  useEffect(() => {
+    if (!cutoutImgRef.current) return;
+    const cutoutImg = cutoutImgRef.current;
+    const canvas = document.createElement('canvas');
+    canvas.width = cutoutImg.naturalWidth || cutoutImg.width;
+    canvas.height = cutoutImg.naturalHeight || cutoutImg.height;
+    const ctx = canvas.getContext('2d')!;
+    ctx.drawImage(cutoutImg, 0, 0);
+
+    const effectiveFormat: ExportFormat = target === 'object_only' ? 'png' : format;
+
+    composeAndRender({
+      target,
+      format: effectiveFormat,
+      quality,
+      cutoutCanvas: canvas,
+      originalImage: null,
+      backgroundImage: bgImgRef.current,
+      backgroundConfig,
+      transform: cutoutTransform,
+      maxDimension: 500,
+    }).then((rendered) => {
+      setPreviewUrl(rendered.dataUrl);
+    });
+  }, [target, format, quality, backgroundConfig, cutoutTransform, cutoutImageUrl]);
 
   const handleSave = async () => {
-    if (!cutoutImageUrl || isExporting) return;
+    if (!cutoutImgRef.current || isExporting) return;
     setIsExporting(true);
     try {
-      const cutoutImg = new Image();
-      await new Promise((resolve, reject) => {
-        cutoutImg.onload = resolve;
-        cutoutImg.onerror = reject;
-        cutoutImg.src = cutoutImageUrl;
-      });
-
+      const cutoutImg = cutoutImgRef.current;
       const canvas = document.createElement('canvas');
-      canvas.width = cutoutImg.naturalWidth;
-      canvas.height = cutoutImg.naturalHeight;
+      canvas.width = cutoutImg.naturalWidth || cutoutImg.width;
+      canvas.height = cutoutImg.naturalHeight || cutoutImg.height;
       const ctx = canvas.getContext('2d')!;
       ctx.drawImage(cutoutImg, 0, 0);
-
-      let bgImg: HTMLImageElement | null = null;
-      if (backgroundConfig.type === 'image' && backgroundConfig.customImageUrl) {
-        bgImg = new Image();
-        await new Promise((r) => {
-          bgImg!.onload = r;
-          bgImg!.src = backgroundConfig.customImageUrl!;
-        });
-      }
 
       const effectiveFormat: ExportFormat = target === 'object_only' ? 'png' : format;
 
@@ -114,7 +101,7 @@ export const ExportScreen: React.FC = () => {
         quality,
         cutoutCanvas: canvas,
         originalImage: null,
-        backgroundImage: bgImg,
+        backgroundImage: bgImgRef.current,
         backgroundConfig,
         transform: cutoutTransform,
       });
@@ -132,30 +119,15 @@ export const ExportScreen: React.FC = () => {
   };
 
   const handleShare = async () => {
-    if (!cutoutImageUrl || isExporting) return;
+    if (!cutoutImgRef.current || isExporting) return;
     setIsExporting(true);
     try {
-      const cutoutImg = new Image();
-      await new Promise((resolve, reject) => {
-        cutoutImg.onload = resolve;
-        cutoutImg.onerror = reject;
-        cutoutImg.src = cutoutImageUrl;
-      });
-
+      const cutoutImg = cutoutImgRef.current;
       const canvas = document.createElement('canvas');
-      canvas.width = cutoutImg.naturalWidth;
-      canvas.height = cutoutImg.naturalHeight;
+      canvas.width = cutoutImg.naturalWidth || cutoutImg.width;
+      canvas.height = cutoutImg.naturalHeight || cutoutImg.height;
       const ctx = canvas.getContext('2d')!;
       ctx.drawImage(cutoutImg, 0, 0);
-
-      let bgImg: HTMLImageElement | null = null;
-      if (backgroundConfig.type === 'image' && backgroundConfig.customImageUrl) {
-        bgImg = new Image();
-        await new Promise((r) => {
-          bgImg!.onload = r;
-          bgImg!.src = backgroundConfig.customImageUrl!;
-        });
-      }
 
       const effectiveFormat: ExportFormat = target === 'object_only' ? 'png' : format;
 
@@ -166,7 +138,7 @@ export const ExportScreen: React.FC = () => {
         quality,
         cutoutCanvas: canvas,
         originalImage: null,
-        backgroundImage: bgImg,
+        backgroundImage: bgImgRef.current,
         backgroundConfig,
         transform: cutoutTransform,
       });

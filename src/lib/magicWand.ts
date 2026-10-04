@@ -1,5 +1,6 @@
 /**
  * Magic Wand Flood Fill for removing contiguous similar color regions.
+ * High-performance typed-array queue implementation.
  */
 export function applyMagicWand(
   imageData: ImageData,
@@ -21,47 +22,48 @@ export function applyMagicWand(
   // If already fully transparent, nothing to erase
   if (targetA === 0) return imageData;
 
-  // Max Euclidean distance is sqrt(255^2 * 4) ≈ 510
   const threshold = (tolerance / 100) * 442;
   const thresholdSq = threshold * threshold;
 
-  const visited = new Uint8Array(width * height);
-  const queue: number[] = [startX + startY * width];
-  visited[startX + startY * width] = 1;
+  const totalPixels = width * height;
+  const visited = new Uint8Array(totalPixels);
+  const queue = new Int32Array(totalPixels);
 
   let queueHead = 0;
+  let queueTail = 0;
 
-  function colorDistSq(idx: number): number {
-    const dr = data[idx] - targetR;
-    const dg = data[idx + 1] - targetG;
-    const db = data[idx + 2] - targetB;
-    const da = data[idx + 3] - targetA;
-    return dr * dr + dg * dg + db * db + da * da;
-  }
+  const startPos = startX + startY * width;
+  queue[queueTail++] = startPos;
+  visited[startPos] = 1;
 
-  while (queueHead < queue.length) {
+  while (queueHead < queueTail) {
     const current = queue[queueHead++];
     const x = current % width;
-    const y = Math.floor(current / width);
     const pixelIdx = current * 4;
 
     // Erase pixel (set alpha to 0)
     data[pixelIdx + 3] = 0;
 
-    // Check 4-connected neighbors
-    const neighbors = [
-      x > 0 ? current - 1 : -1,
-      x < width - 1 ? current + 1 : -1,
-      y > 0 ? current - width : -1,
-      y < height - 1 ? current + width : -1,
-    ];
+    const nLeft = x > 0 ? current - 1 : -1;
+    const nRight = x < width - 1 ? current + 1 : -1;
+    const nUp = current >= width ? current - width : -1;
+    const nDown = current + width < totalPixels ? current + width : -1;
 
-    for (const n of neighbors) {
+    const neighbors = [nLeft, nRight, nUp, nDown];
+
+    for (let i = 0; i < 4; i++) {
+      const n = neighbors[i];
       if (n !== -1 && !visited[n]) {
         visited[n] = 1;
         const nIdx = n * 4;
-        if (data[nIdx + 3] > 0 && colorDistSq(nIdx) <= thresholdSq) {
-          queue.push(n);
+        if (data[nIdx + 3] > 0) {
+          const dr = data[nIdx] - targetR;
+          const dg = data[nIdx + 1] - targetG;
+          const db = data[nIdx + 2] - targetB;
+          const da = data[nIdx + 3] - targetA;
+          if (dr * dr + dg * dg + db * db + da * da <= thresholdSq) {
+            queue[queueTail++] = n;
+          }
         }
       }
     }

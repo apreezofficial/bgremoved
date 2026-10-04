@@ -49,7 +49,6 @@ export const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
     // Drawing state
     const isInteractingRef = useRef<boolean>(false);
     const lastPointRef = useRef<{ x: number; y: number } | null>(null);
-  const drawPendingRef = useRef<boolean>(false);
 
     // Gesture tracking (pinch / 2-finger pan)
     const touchStartDistRef = useRef<number | null>(null);
@@ -66,13 +65,11 @@ export const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
 
     const pushHistory = useCallback(
       (imageData: ImageData) => {
-        // Clone image data
         const cloned = new ImageData(
           new Uint8ClampedArray(imageData.data),
           imageData.width,
           imageData.height
         );
-        // Truncate redo
         const newHist = historyRef.current.slice(0, historyIndexRef.current + 1);
         newHist.push(cloned);
         if (newHist.length > MAX_HISTORY) {
@@ -180,6 +177,8 @@ export const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
       const canvas = canvasRef.current;
       if (!canvas) return null;
       const rect = canvas.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return null;
+
       const scaleX = canvas.width / rect.width;
       const scaleY = canvas.height / rect.height;
 
@@ -188,15 +187,15 @@ export const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
       return { x, y };
     };
 
-    // Brush stroke interpolation
+    // Fast, precise brush rendering
     const drawBrush = (x: number, y: number) => {
       const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
       const { size, softness } = brushSettings;
 
-      ctx.save();
       if (activeTool === 'erase') {
+        ctx.save();
         ctx.globalCompositeOperation = 'destination-out';
         if (softness > 0.05) {
           const grad = ctx.createRadialGradient(x, y, size * (1 - softness) * 0.5, x, y, size * 0.5);
@@ -209,54 +208,21 @@ export const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
         ctx.beginPath();
         ctx.arc(x, y, size * 0.5, 0, Math.PI * 2);
         ctx.fill();
+        ctx.restore();
       } else if (activeTool === 'restore' && origImgRef.current) {
-        // To restore original pixels:
-        // Use a temporary offscreen circular clip and draw original image through it
-        const off = document.createElement('canvas');
-        off.width = size;
-        off.height = size;
-        const offCtx = off.getContext('2d')!;
-
-        // Draw source portion
-        // Clamp source coordinates to ensure they stay within the original image bounds
-        const canvas = canvasRef.current!;
-        const maxX = canvas.width - size;
-        const maxY = canvas.height - size;
-        const sx = Math.max(0, Math.min(x - size * 0.5, maxX));
-        const sy = Math.max(0, Math.min(y - size * 0.5, maxY));
-        offCtx.drawImage(origImgRef.current, sx, sy, size, size, 0, 0, size, size);
-
-        // Apply radial mask
-        offCtx.globalCompositeOperation = 'destination-in';
-        if (softness > 0.05) {
-          const grad = offCtx.createRadialGradient(
-            size * 0.5,
-            size * 0.5,
-            size * (1 - softness) * 0.5,
-            size * 0.5,
-            size * 0.5,
-            size * 0.5
-          );
-          grad.addColorStop(0, 'rgba(0,0,0,1)');
-          grad.addColorStop(1, 'rgba(0,0,0,0)');
-          offCtx.fillStyle = grad;
-        } else {
-          offCtx.fillStyle = 'rgba(0,0,0,1)';
-        }
-        offCtx.beginPath();
-        offCtx.arc(size * 0.5, size * 0.5, size * 0.5, 0, Math.PI * 2);
-        offCtx.fill();
-
-        // Draw restored patch over working canvas
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.drawImage(off, sx, sy);
+        // Precise, hardware-accelerated original pixel restoration
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(x, y, size * 0.5, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.drawImage(origImgRef.current, 0, 0, canvas.width, canvas.height);
+        ctx.restore();
       }
-      ctx.restore();
     };
 
     const drawLine = (fromX: number, fromY: number, toX: number, toY: number) => {
       const dist = Math.hypot(toX - fromX, toY - fromY);
-      const step = Math.max(1, brushSettings.size * 0.2);
+      const step = Math.max(1, brushSettings.size * 0.15);
       const steps = Math.ceil(dist / step);
       for (let i = 0; i <= steps; i++) {
         const t = steps === 0 ? 0 : i / steps;
@@ -268,15 +234,15 @@ export const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
 
     // Pointer events (Mouse / Touch)
     const handlePointerDown = (e: React.PointerEvent) => {
-      // Background move/scale tool
       if (activeTool === 'background') {
         isInteractingRef.current = true;
         lastPointRef.current = { x: e.clientX, y: e.clientY };
-        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        try {
+          (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        } catch {}
         return;
       }
 
-      // Drawing or Magic Wand
       const coords = getCanvasCoords(e.clientX, e.clientY);
       if (!coords) return;
 
@@ -295,7 +261,9 @@ export const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
         isInteractingRef.current = true;
         lastPointRef.current = coords;
         drawBrush(coords.x, coords.y);
-        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        try {
+          (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        } catch {}
       }
     };
 
@@ -317,15 +285,8 @@ export const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
       if (activeTool === 'erase' || activeTool === 'restore') {
         const coords = getCanvasCoords(e.clientX, e.clientY);
         if (!coords) return;
-        // Throttle drawing using requestAnimationFrame
-        if (!drawPendingRef.current) {
-          drawPendingRef.current = true;
-          requestAnimationFrame(() => {
-            drawLine(lastPointRef.current!.x, lastPointRef.current!.y, coords.x, coords.y);
-            lastPointRef.current = coords;
-            drawPendingRef.current = false;
-          });
-        }
+        drawLine(lastPointRef.current.x, lastPointRef.current.y, coords.x, coords.y);
+        lastPointRef.current = coords;
       }
     };
 
@@ -333,6 +294,9 @@ export const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
       if (!isInteractingRef.current) return;
       isInteractingRef.current = false;
       lastPointRef.current = null;
+      try {
+        (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch {}
 
       if (activeTool === 'erase' || activeTool === 'restore') {
         const canvas = canvasRef.current;
@@ -377,7 +341,6 @@ export const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
         const angleDelta = currentAngle - (touchStartAngleRef.current || 0);
 
         if (activeTool === 'background' && touchStartTransformRef.current) {
-          // Scale & rotate cutout over background
           setCutoutTransform({
             x: touchStartTransformRef.current.x + (currentCenter.x - touchStartCenterRef.current.x),
             y: touchStartTransformRef.current.y + (currentCenter.y - touchStartCenterRef.current.y),
@@ -385,7 +348,6 @@ export const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
             rotation: (touchStartTransformRef.current.rotation + angleDelta) % 360,
           });
         } else {
-          // Viewport pinch-zoom and pan
           const newZoom = Math.max(0.5, Math.min(6, zoom * scaleChange));
           setZoom(newZoom);
           setPan((p) => ({
@@ -438,7 +400,7 @@ export const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
       >
         {/* Background Layer container */}
         <div
-          className={`relative max-w-full max-h-full flex items-center justify-center transition-transform duration-75 ${
+          className={`relative max-w-full max-h-full flex items-center justify-center ${
             backgroundConfig.type === 'transparent' ? 'bg-checkerboard' : ''
           }`}
           style={{
@@ -452,7 +414,7 @@ export const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
             className="max-h-[72vh] max-w-[92vw] object-contain shadow-none touch-none cursor-crosshair"
             style={{
               transform:
-                activeTool === 'background' || backgroundConfig.type !== 'transparent'
+                activeTool === 'background'
                   ? `translate(${cutoutTransform.x}px, ${cutoutTransform.y}px) scale(${cutoutTransform.scale}) rotate(${cutoutTransform.rotation}deg)`
                   : 'none',
               transformOrigin: 'center center',
@@ -460,6 +422,7 @@ export const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
           />
         </div>
 

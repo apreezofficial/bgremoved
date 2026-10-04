@@ -61,16 +61,16 @@ export const EditorScreen: React.FC = () => {
   const handleExportClick = () => {
     const canvas = editorRef.current?.getCutoutCanvas();
     if (canvas) {
-      canvas.toBlob((blob) => {
-        if (blob) {
-          const url = URL.createObjectURL(blob);
-          setCutoutImageUrl(url);
-        }
-        setScreen('export');
-      }, 'image/png');
-    } else {
-      setScreen('export');
+      try {
+        const dataUrl = canvas.toDataURL('image/png');
+        setCutoutImageUrl(dataUrl);
+      } catch {
+        canvas.toBlob((blob) => {
+          if (blob) setCutoutImageUrl(URL.createObjectURL(blob));
+        }, 'image/png');
+      }
     }
+    setScreen('export');
   };
 
   return (
