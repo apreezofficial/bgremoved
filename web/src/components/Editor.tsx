@@ -284,12 +284,29 @@ export const Editor = forwardRef<EditorHandle, Props>(({ compare, cropAspect, on
   };
 
   // ---- pointer interaction ----------------------------------------------
-  const mode = useRef<null | 'pan' | 'stroke'>(null);
+  const mode = useRef<null | 'pan' | 'stroke' | 'pinch'>(null);
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef<{ dist: number; cx: number; cy: number } | null>(null);
+
+  const pinchStats = () => {
+    const [a, b] = Array.from(pointers.current.values());
+    return { dist: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)), cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 };
+  };
   const last = useRef({ x: 0, y: 0 });
   const lastClient = useRef({ x: 0, y: 0 });
 
   const onPointerDown = (e: React.PointerEvent) => {
     if ((e.target as HTMLElement).closest('[data-nodraw]')) return;
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.current.size === 2) {
+      // second finger: discard any half-drawn stroke and switch to pinch zoom / two-finger pan
+      if (mode.current === 'stroke' && histRef.current[idxRef.current]) restore(histRef.current[idxRef.current]);
+      mode.current = 'pinch';
+      pinch.current = pinchStats();
+      setPanning(false);
+      return;
+    }
+    if (pointers.current.size > 2) return;
     const st = useAppStore.getState();
     if (st.tool === 'pan' || spaceDown || e.button === 1) {
       mode.current = 'pan';
@@ -320,6 +337,25 @@ export const Editor = forwardRef<EditorHandle, Props>(({ compare, cropAspect, on
       const r = stageRef.current!.getBoundingClientRect();
       ring.style.transform = `translate(${e.clientX - r.left}px, ${e.clientY - r.top}px) translate(-50%, -50%)`;
     }
+    if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (mode.current === 'pinch') {
+      if (pointers.current.size >= 2 && pinch.current) {
+        const cur = pinchStats();
+        const prev = pinch.current;
+        const st = useAppStore.getState();
+        const next = Math.max(0.1, Math.min(4, st.zoom * (cur.dist / prev.dist)));
+        const ratio = next / st.zoom;
+        const r = stageRef.current!.getBoundingClientRect();
+        const cx = cur.cx - (r.left + r.width / 2);
+        const cy = cur.cy - (r.top + r.height / 2);
+        setPan((p) => ({ x: cx - (cx - p.x) * ratio + (cur.cx - prev.cx) * 0, y: cy - (cy - p.y) * ratio }));
+        // add the finger-centre drift so two-finger drag pans too
+        setPan((p) => ({ x: p.x + (cur.cx - prev.cx), y: p.y + (cur.cy - prev.cy) }));
+        st.setZoom(next);
+        pinch.current = cur;
+      }
+      return;
+    }
     if (mode.current === 'pan') {
       const dx = e.clientX - lastClient.current.x;
       const dy = e.clientY - lastClient.current.y;
@@ -332,7 +368,12 @@ export const Editor = forwardRef<EditorHandle, Props>(({ compare, cropAspect, on
     }
   };
 
-  const onPointerUp = () => {
+  const onPointerUp = (e: React.PointerEvent) => {
+    pointers.current.delete(e.pointerId);
+    if (mode.current === 'pinch') {
+      if (pointers.current.size < 2) { mode.current = null; pinch.current = null; }
+      return;
+    }
     if (mode.current === 'stroke') pushHistory();
     mode.current = null;
     setPanning(false);
